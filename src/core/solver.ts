@@ -1,14 +1,14 @@
 import {
   evaluateBoard,
   hashBoardState,
+  isUselessSameSuitTransfer,
   planFillEmptyColumnsAndDeal,
   simulateAndScoreMove,
 } from './heuristics';
-import { getLegalMoves, getMaxMovableTailStart } from './rules';
+import { getLegalMoves } from './rules';
 import type {
   Card,
   GameState,
-  MoveAction,
   SolverResponse,
   SolverStep,
 } from './types';
@@ -30,37 +30,6 @@ interface BeamNode {
   rankScore: number;
   revealedUnknown: boolean;
   won: boolean;
-}
-
-/**
- * Filters out strictly redundant moves inside Beam Search without blocking
- * legitimate multi-step tactical staging (e.g. moving a blocker to an empty column
- * or splitting a run onto a natural parent / empty column to unlock a longer run).
- */
-function isRedundantSearchMove(columns: Card[][], move: MoveAction): boolean {
-  const srcCol = columns[move.fromCol];
-  const dstCol = columns[move.toCol];
-
-  // Moving an entire column onto an empty column is a pure no-op
-  if (move.cardIndex === 0 && dstCol.length === 0) {
-    return true;
-  }
-
-  const tailStart = getMaxMovableTailStart(srcCol);
-  const splitSameSuit = move.cardIndex > tailStart;
-
-  // Splitting a same-suit run ONLY to place it onto another card of the exact
-  // same suit & rank accomplishes nothing (identical parent relationship)
-  if (
-    splitSameSuit &&
-    dstCol.length > 0 &&
-    dstCol[dstCol.length - 1].suit === srcCol[move.cardIndex - 1].suit &&
-    dstCol[dstCol.length - 1].rank === srcCol[move.cardIndex - 1].rank
-  ) {
-    return true;
-  }
-
-  return false;
 }
 
 function runBeamSearch(
@@ -106,7 +75,7 @@ function runBeamSearch(
       const moves = getLegalMoves(node.columns);
       for (const move of moves) {
         if (nodesExpanded >= maxNodes) break;
-        if (isRedundantSearchMove(node.columns, move)) continue;
+        if (isUselessSameSuitTransfer(node.columns, move)) continue;
         nodesExpanded++;
 
         const evaluated = simulateAndScoreMove(

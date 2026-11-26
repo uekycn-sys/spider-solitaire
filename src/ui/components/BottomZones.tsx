@@ -8,6 +8,7 @@ interface BottomZonesProps {
   cardBack: CardBackTheme;
   cardWidth: number;
   hasEmptyColumns: boolean;
+  highlightDeal?: boolean;
   onDealStock: () => void;
   completedZoneRef?: React.RefObject<HTMLDivElement | null>;
   stockZoneRef?: React.RefObject<HTMLDivElement | null>;
@@ -19,6 +20,7 @@ export const BottomZones: React.FC<BottomZonesProps> = ({
   cardBack,
   cardWidth,
   hasEmptyColumns,
+  highlightDeal = false,
   onDealStock,
   completedZoneRef,
   stockZoneRef,
@@ -118,7 +120,12 @@ export const BottomZones: React.FC<BottomZonesProps> = ({
                   right: (stockCount - 1 - idx) * stockStep,
                   zIndex: idx + 1,
                 }}
-                className="absolute bottom-0 rounded-[7px] shadow-[0_4px_12px_rgba(0,0,0,0.55)] transition-transform duration-150 group-hover:-translate-y-1 group-active:translate-y-0 overflow-hidden"
+                className={[
+                  'absolute bottom-0 rounded-[7px] transition-transform duration-150 group-hover:-translate-y-1 group-active:translate-y-0 overflow-hidden',
+                  highlightDeal && idx === stockCount - 1
+                    ? 'hint-source-glow'
+                    : 'shadow-[0_4px_12px_rgba(0,0,0,0.55)]',
+                ].join(' ')}
               >
                 <CardBackSvg theme={cardBack} className="w-full h-full block" />
               </div>

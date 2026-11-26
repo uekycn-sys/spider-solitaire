@@ -251,6 +251,47 @@ export function planFillEmptyColumnsAndDeal(
   return null;
 }
 
+/**
+ * Returns true if `move` is a strictly useless / oscillating transfer:
+ * - Moving a whole column (cardIndex === 0) into an empty column, OR
+ * - Splitting an intact same-suit run ONLY to place its sub-tail onto an equal
+ *   or shorter same-suit run of the exact same suit & rank (e.g. moving 2♠-A♠
+ *   back and forth between two [4♠, 3♠] columns).
+ *
+ * Conversely, moving a sub-tail onto a STRICTLY LONGER same-suit run
+ * (`dstRunLen > srcPrefixLen`, e.g. moving 2♠-A♠ from [3♠, 2♠, A♠] onto
+ * [K♠..4♠, 3♠]) IS allowed because it genuinely consolidates a longer run.
+ */
+export function isUselessSameSuitTransfer(
+  columns: Card[][],
+  move: MoveAction
+): boolean {
+  const srcCol = columns[move.fromCol];
+  const dstCol = columns[move.toCol];
+
+  if (move.cardIndex === 0 && dstCol.length === 0) {
+    return true;
+  }
+
+  const tailStart = getMaxMovableTailStart(srcCol);
+  const splitSameSuit = move.cardIndex > tailStart;
+  if (!splitSameSuit || dstCol.length === 0) {
+    return false;
+  }
+
+  const movingTop = srcCol[move.cardIndex];
+  const dstTop = dstCol[dstCol.length - 1];
+  if (dstTop.suit === movingTop.suit && dstTop.rank === movingTop.rank + 1) {
+    const srcPrefixLen = move.cardIndex - tailStart;
+    const dstRunLen = dstCol.length - getMaxMovableTailStart(dstCol);
+    if (dstRunLen <= srcPrefixLen) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export interface EvaluatedMove {
   move: MoveAction;
   nextColumns: Card[][];
@@ -314,10 +355,15 @@ export function simulateAndScoreMove(
   const nextEval = evaluateBoard(nextColumns, nextCompletedCount, stockCount);
   const boardDelta = nextEval - baseEval;
 
+  const uselessTransfer = isUselessSameSuitTransfer(columns, move);
+
   let delta = boardDelta;
   let reason = '调整牌序以创造更多空间';
 
-  if (completedRun) {
+  if (uselessTransfer) {
+    delta = -999;
+    reason = '无效的同花色来回倒腾';
+  } else if (completedRun) {
     delta += 15000;
     reason = '凑齐完整 K→A 同花顺并自动收牌';
   } else if (dstHadSameSuit && !splitSameSuit) {
@@ -335,20 +381,26 @@ export function simulateAndScoreMove(
       delta += 40;
       reason = '暂存至空列以释放被压住的牌';
     }
-  } else if (dstHadSameSuit && splitSameSuit) {
-    delta += 50;
-    reason = '重组同花色顺子';
+  } else if (dstHadSameSuit && splitSameSuit && boardDelta > 0) {
+    reason = '合并至更长的同花色顺子';
   }
 
   // Discourage splitting an intact same-suit run onto a different-suit card or empty column
   // unless it flips a face-down card or completes a run.
-  if (splitSameSuit && !completedRun && !revealedHidden && !dstHadSameSuit) {
+  if (
+    !uselessTransfer &&
+    splitSameSuit &&
+    !completedRun &&
+    !revealedHidden &&
+    !dstHadSameSuit
+  ) {
     delta -= 520;
   }
 
   // Discourage pure lateral shuffling between two different-suit cards of identical rank
   const srcParent = move.cardIndex > 0 ? srcCol[move.cardIndex - 1] : null;
   if (
+    !uselessTransfer &&
     !completedRun &&
     !revealedHidden &&
     !willCreateEmpty &&
@@ -364,11 +416,12 @@ export function simulateAndScoreMove(
 
   const nextHash = hashBoardState(nextColumns, stockCount, nextCompletedCount);
   const isProductive =
-    completedRun ||
-    revealedHidden ||
-    willCreateEmpty ||
-    (dstHadSameSuit && !splitSameSuit) ||
-    boardDelta > 15;
+    !uselessTransfer &&
+    (completedRun ||
+      revealedHidden ||
+      willCreateEmpty ||
+      (dstHadSameSuit && !splitSameSuit) ||
+      boardDelta > 15);
 
   return {
     move,
@@ -399,10 +452,21 @@ export function getBestHint(
   const stockCount = state.stockDeals.length;
   const completedCount = state.completedRuns.length;
 
+  const initialBoardScore = evaluateBoard(
+    state.columns,
+    completedCount,
+    stockCount
+  );
+
   let bestEval: EvaluatedMove | null = null;
   let bestCombinedScore = -Infinity;
+  let bestHasTrueProgress = false;
 
   for (const move of legalMoves) {
+    if (isUselessSameSuitTransfer(state.columns, move)) {
+      continue;
+    }
+
     const first = simulateAndScoreMove(
       state.columns,
       move,
@@ -415,12 +479,16 @@ export function getBestHint(
     }
 
     let combinedScore = first.score;
+    let hasTrueProgress = first.isProductive;
 
     // 2-ply lookahead: if the first move doesn't flip an unknown card, evaluate best follow-up
     if (!first.revealedHidden && !first.completedRun) {
       const followUps = getLegalMoves(first.nextColumns);
       let bestFollowScore = 0;
       for (const follow of followUps) {
+        if (isUselessSameSuitTransfer(first.nextColumns, follow)) {
+          continue;
+        }
         const second = simulateAndScoreMove(
           first.nextColumns,
           follow,
@@ -428,20 +496,35 @@ export function getBestHint(
           stockCount
         );
         if (recentStateHashes?.has(second.nextHash)) continue;
-        if (second.score > bestFollowScore) {
+
+        const netBoardGain =
+          evaluateBoard(second.nextColumns, second.nextCompletedCount, stockCount) -
+          initialBoardScore;
+        const followMakesRealProgress =
+          second.completedRun || second.revealedHidden || netBoardGain > 15;
+
+        if (followMakesRealProgress && second.score > bestFollowScore) {
           bestFollowScore = second.score;
+          hasTrueProgress = true;
         }
       }
       combinedScore += bestFollowScore * 0.68;
     }
 
-    if (combinedScore > bestCombinedScore) {
+    if (
+      hasTrueProgress &&
+      (!bestHasTrueProgress || combinedScore > bestCombinedScore)
+    ) {
+      bestHasTrueProgress = true;
+      bestCombinedScore = combinedScore;
+      bestEval = first;
+    } else if (!bestHasTrueProgress && combinedScore > bestCombinedScore) {
       bestCombinedScore = combinedScore;
       bestEval = first;
     }
   }
 
-  if (bestEval && (bestEval.isProductive || bestCombinedScore > 30)) {
+  if (bestEval && bestHasTrueProgress && combinedScoreIsPositive(bestCombinedScore)) {
     return {
       action: bestEval.move,
       reason: bestEval.reason,
@@ -494,4 +577,8 @@ export function getBestHint(
     score: -999,
     status: 'stuck',
   };
+}
+
+function combinedScoreIsPositive(score: number): boolean {
+  return score > 15;
 }

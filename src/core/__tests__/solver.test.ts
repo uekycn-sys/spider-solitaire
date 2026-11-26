@@ -238,4 +238,52 @@ describe('heuristics hint & beam search solver', () => {
     // Should have made substantial progress (completed multiple runs or won outright)
     expect(sim.completedRuns.length).toBeGreaterThanOrEqual(4);
   });
+
+  it('regression: never suggests ping-ponging 2-A between two identical [4, 3] columns', () => {
+    const state = emptyState();
+    state.difficulty = 'easy';
+    state.columns = [
+      [card(5, 'spades', false), card(1, 'spades', true)],
+      [card(5, 'spades', false), card(4, 'spades', true), card(3, 'spades', true)],
+      [card(5, 'spades', false), card(1, 'spades', true)],
+      [card(5, 'spades', false), card(13, 'spades', true), card(12, 'spades', true)],
+      [card(5, 'spades', false), card(8, 'spades', true), card(7, 'spades', true), card(6, 'spades', true)],
+      [card(5, 'spades', false), card(1, 'spades', true)],
+      [card(5, 'spades', false), card(7, 'spades', true)],
+      [card(5, 'spades', false), card(4, 'spades', true), card(3, 'spades', true), card(2, 'spades', true), card(1, 'spades', true)],
+      [card(5, 'spades', false), card(8, 'spades', true), card(7, 'spades', true), card(6, 'spades', true)],
+      [card(5, 'spades', false), card(10, 'spades', true)],
+    ];
+    state.stockDeals = [
+      Array.from({ length: 10 }, (_, idx) =>
+        card((((idx + 1) % 13) + 1) as Rank, 'spades', false)
+      ),
+    ];
+
+    // Hint must recommend dealing instead of ping-ponging 2-A onto [4, 3] or 6 onto [7]
+    const hint = getBestHint(state);
+    expect(hint.status).toBe('deal');
+    expect(hint.action).toEqual({ type: 'deal' });
+
+    // Solver must also directly deal instead of oscillating
+    const solved = solveFromState(state);
+    expect(solved.status).toBe('found');
+    expect(solved.steps).toHaveLength(1);
+    expect(solved.steps[0].action).toEqual({ type: 'deal' });
+  });
+
+  it('allows splitting a same-suit tail when moving it onto a STRICTLY LONGER same-suit run', () => {
+    const state = emptyState();
+    state.difficulty = 'easy';
+    // Col 0: [K..4, 3] (11-card same-suit run), Col 1: [4, 3, 2, A] (prefix [4,3] len 2 < 11)
+    // Moving [2, A] from Col 1 onto Col 0 completes K->A!
+    state.columns[0] = ([13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3] as Rank[]).map((r) =>
+      card(r, 'spades', true)
+    );
+    state.columns[1] = ([4, 3, 2, 1] as Rank[]).map((r) => card(r, 'spades', true));
+
+    const hint = getBestHint(state);
+    expect(hint.status).toBe('move');
+    expect(hint.action).toEqual({ type: 'move', fromCol: 1, cardIndex: 2, toCol: 0 });
+  });
 });

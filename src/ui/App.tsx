@@ -258,6 +258,7 @@ export const App: React.FC = () => {
         cardBack={preferences.cardBack}
         cardWidth={boardMetrics?.cardWidth ?? 86}
         hasEmptyColumns={hasEmptyColumns}
+        highlightDeal={activeHint?.type === 'deal'}
         onDealStock={handleUserDeal}
         completedZoneRef={completedZoneRef}
         stockZoneRef={stockZoneRef}
