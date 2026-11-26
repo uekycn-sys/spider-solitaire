@@ -317,7 +317,7 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="fixed inset-0 bg-black/72 backdrop-blur-sm"
-        onClick={canResume ? onClose : undefined}
+        onClick={onClose}
       />
       <div className="relative z-10 w-full max-w-md rounded-2xl bg-gradient-to-b from-[#112119] to-[#09120d] border border-[#d4af37]/55 shadow-[0_24px_60px_rgba(0,0,0,0.8)] p-6 space-y-5">
         <div className="text-center space-y-1">
@@ -359,7 +359,7 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
           ))}
         </div>
 
-        {canResume && onResume && (
+        {canResume && onResume ? (
           <button
             type="button"
             onClick={onResume}
@@ -367,7 +367,15 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
           >
             继续当前对局
           </button>
-        )}
+        ) : onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/15 text-sm font-medium text-stone-200 transition cursor-pointer"
+          >
+            返回结算弹窗
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -320,7 +320,7 @@ export const App: React.FC = () => {
       />
 
       <VictoryModal
-        open={gameState.won}
+        open={gameState.won && !difficultyModalOpen && !menuOpen}
         score={gameState.score}
         moves={gameState.moves}
         elapsedSeconds={gameState.elapsedSeconds}
