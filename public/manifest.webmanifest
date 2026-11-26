@@ -1,0 +1,24 @@
+{
+  "name": "蜘蛛纸牌 · Spider Solitaire",
+  "short_name": "蜘蛛纸牌",
+  "description": "经典赌场质感网页版蜘蛛纸牌与 AI 束搜索求解器",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a1611",
+  "theme_color": "#0a1611",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
