@@ -1,10 +1,17 @@
 import {
   evaluateBoard,
   hashBoardState,
+  planFillEmptyColumnsAndDeal,
   simulateAndScoreMove,
 } from './heuristics';
-import { getLegalMoves } from './rules';
-import type { Card, GameState, SolverResponse, SolverStep } from './types';
+import { getLegalMoves, getMaxMovableTailStart } from './rules';
+import type {
+  Card,
+  GameState,
+  MoveAction,
+  SolverResponse,
+  SolverStep,
+} from './types';
 
 export interface SolverOptions {
   beamWidth?: number;
@@ -19,59 +26,66 @@ interface BeamNode {
   completedCount: number;
   stockCount: number;
   path: SolverStep[];
-  cumulativeScore: number;
   boardScore: number;
+  rankScore: number;
   revealedUnknown: boolean;
   won: boolean;
 }
 
 /**
- * Pure TypeScript Beam Search solver with canonical state hashing.
- * Runs cleanly inside both Node (Vitest) and Web Workers.
- *
- * Design detail: when a simulated branch flips a previously hidden face-down card,
- * the solver does not peek at the card's value ahead of time; instead it awards the
- * reveal bonus and stops expanding that branch so the UI applies the move, reveals
- * the real card, and requests the next solver batch seamlessly.
+ * Filters out strictly redundant moves inside Beam Search without blocking
+ * legitimate multi-step tactical staging (e.g. moving a blocker to an empty column
+ * or splitting a run onto a natural parent / empty column to unlock a longer run).
  */
-export function solveFromState(
-  state: GameState,
-  options: SolverOptions = {}
-): SolverResponse {
-  const requestId = options.requestId ?? 0;
-  const beamWidth = options.beamWidth ?? 44;
-  const maxDepth = options.maxDepth ?? 12;
-  const maxNodes = options.maxNodes ?? 1600;
-  const stockCount = state.stockDeals.length;
-  const initialCompleted = state.completedRuns.length;
+function isRedundantSearchMove(columns: Card[][], move: MoveAction): boolean {
+  const srcCol = columns[move.fromCol];
+  const dstCol = columns[move.toCol];
 
-  if (state.won || initialCompleted >= 8) {
-    return {
-      requestId,
-      steps: [],
-      status: 'won_path',
-      message: '本局已完成！',
-    };
+  // Moving an entire column onto an empty column is a pure no-op
+  if (move.cardIndex === 0 && dstCol.length === 0) {
+    return true;
   }
 
-  const visited = new Set<string>(options.avoidHashes ?? []);
-  const rootHash = hashBoardState(state.columns, stockCount, initialCompleted);
+  const tailStart = getMaxMovableTailStart(srcCol);
+  const splitSameSuit = move.cardIndex > tailStart;
+
+  // Splitting a same-suit run ONLY to place it onto another card of the exact
+  // same suit & rank accomplishes nothing (identical parent relationship)
+  if (
+    splitSameSuit &&
+    dstCol.length > 0 &&
+    dstCol[dstCol.length - 1].suit === srcCol[move.cardIndex - 1].suit &&
+    dstCol[dstCol.length - 1].rank === srcCol[move.cardIndex - 1].rank
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function runBeamSearch(
+  columns: Card[][],
+  initialCompleted: number,
+  stockCount: number,
+  beamWidth: number,
+  maxDepth: number,
+  maxNodes: number,
+  avoidHashes: string[]
+): { bestNode: BeamNode | null; initialBoardScore: number } {
+  const visited = new Set<string>(avoidHashes);
+  const rootHash = hashBoardState(columns, stockCount, initialCompleted);
   visited.add(rootHash);
 
-  const initialBoardScore = evaluateBoard(
-    state.columns,
-    initialCompleted,
-    stockCount
-  );
+  const initialBoardScore = evaluateBoard(columns, initialCompleted, stockCount);
 
   let beam: BeamNode[] = [
     {
-      columns: state.columns,
+      columns,
       completedCount: initialCompleted,
       stockCount,
       path: [],
-      cumulativeScore: 0,
       boardScore: initialBoardScore,
+      rankScore: initialBoardScore,
       revealedUnknown: false,
       won: false,
     },
@@ -92,6 +106,7 @@ export function solveFromState(
       const moves = getLegalMoves(node.columns);
       for (const move of moves) {
         if (nodesExpanded >= maxNodes) break;
+        if (isRedundantSearchMove(node.columns, move)) continue;
         nodesExpanded++;
 
         const evaluated = simulateAndScoreMove(
@@ -100,11 +115,6 @@ export function solveFromState(
           node.completedCount,
           node.stockCount
         );
-
-        // Prune clearly destructive splits unless it is the very first depth fallback
-        if (evaluated.score < -350 && depth > 0) {
-          continue;
-        }
 
         if (visited.has(evaluated.nextHash)) {
           continue;
@@ -117,20 +127,22 @@ export function solveFromState(
           node.stockCount
         );
 
-        // Slight step cost (-12) encourages shorter, crisp move sequences
-        const nextCumulative =
-          node.cumulativeScore + evaluated.score - 12;
+        const stepLen = node.path.length + 1;
+        // Pure state-potential ranking: temporary staging into empty columns or
+        // tactical splits are NOT permanently penalized once the follow-up pays off!
+        const nextRankScore =
+          nextBoardScore +
+          (evaluated.revealedHidden ? 520 : 0) +
+          (evaluated.completedRun ? 6000 : 0) -
+          stepLen * 18;
 
         const candidate: BeamNode = {
           columns: evaluated.nextColumns,
           completedCount: evaluated.nextCompletedCount,
           stockCount: node.stockCount,
-          path: [
-            ...node.path,
-            { action: move, reason: evaluated.reason },
-          ],
-          cumulativeScore: nextCumulative,
+          path: [...node.path, { action: move, reason: evaluated.reason }],
           boardScore: nextBoardScore,
+          rankScore: nextRankScore,
           revealedUnknown: evaluated.revealedHidden,
           won: evaluated.nextCompletedCount >= 8,
         };
@@ -140,7 +152,7 @@ export function solveFromState(
         if (
           !bestNode ||
           candidate.won ||
-          candidate.cumulativeScore > bestNode.cumulativeScore
+          (!bestNode.won && candidate.rankScore > bestNode.rankScore)
         ) {
           bestNode = candidate;
         }
@@ -153,30 +165,95 @@ export function solveFromState(
 
     nextCandidates.sort((a, b) => {
       if (a.won !== b.won) return a.won ? -1 : 1;
-      return b.cumulativeScore - a.cumulativeScore;
+      return b.rankScore - a.rankScore;
     });
 
     beam = nextCandidates.slice(0, beamWidth);
 
     if (beam[0].won) {
-      return {
-        requestId,
-        steps: beam[0].path,
-        status: 'won_path',
-      };
+      return { bestNode: beam[0], initialBoardScore };
     }
 
     if (nodesExpanded >= maxNodes) break;
   }
 
-  // Accept the best path if it achieves meaningful positive progress
+  return { bestNode, initialBoardScore };
+}
+
+/**
+ * Inspects recent undo history to recommend how many steps back lead to a
+ * meaningfully different decision point (e.g. before a deal or before losing an
+ * alternative branch), instead of blindly suggesting 3 steps.
+ */
+function computeSmartUndoSuggestion(state: GameState): number {
+  const historyLen = state.history.length;
+  if (historyLen === 0) return 0;
+
+  const currStock = state.stockDeals.length;
+  const maxInspect = Math.min(historyLen, 12);
+
+  for (let back = 1; back <= maxInspect; back++) {
+    const entry = state.history[historyLen - back];
+    // Rewinding before the last stock deal or before an empty column was consumed
+    // often opens completely new tactical branches.
+    if (entry.stockDeals.length > currStock) {
+      return back;
+    }
+    const legalMoves = getLegalMoves(entry.columns);
+    if (legalMoves.length >= 3 && back >= 2) {
+      return back;
+    }
+  }
+
+  return Math.min(historyLen, 4);
+}
+
+/**
+ * Pure TypeScript Beam Search solver with canonical state hashing and an atomic
+ * empty-column fill-and-deal planner.
+ *
+ * Runs cleanly inside both Node (Vitest) and Web Workers.
+ */
+export function solveFromState(
+  state: GameState,
+  options: SolverOptions = {}
+): SolverResponse {
+  const requestId = options.requestId ?? 0;
+  const beamWidth = options.beamWidth ?? 80;
+  const maxDepth = options.maxDepth ?? 16;
+  const maxNodes = options.maxNodes ?? 5500;
+  const stockCount = state.stockDeals.length;
+  const initialCompleted = state.completedRuns.length;
+
+  if (state.won || initialCompleted >= 8) {
+    return {
+      requestId,
+      steps: [],
+      status: 'won_path',
+      message: '本局已完成！',
+    };
+  }
+
+  const avoidHashes = options.avoidHashes ?? [];
+
+  // Phase 1: Pure state-potential Beam Search looking for runs, flips, or strict board improvements
+  const { bestNode, initialBoardScore } = runBeamSearch(
+    state.columns,
+    initialCompleted,
+    stockCount,
+    beamWidth,
+    maxDepth,
+    maxNodes,
+    avoidHashes
+  );
+
   if (
     bestNode &&
     bestNode.path.length > 0 &&
-    (bestNode.completedCount > initialCompleted ||
+    (bestNode.won ||
+      bestNode.completedCount > initialCompleted ||
       bestNode.revealedUnknown ||
-      bestNode.boardScore > initialBoardScore + 20 ||
-      bestNode.cumulativeScore > 30)
+      bestNode.boardScore > initialBoardScore + 15)
   ) {
     return {
       requestId,
@@ -185,41 +262,81 @@ export function solveFromState(
     };
   }
 
-  // Otherwise consider dealing from stock if possible
+  // Phase 2: If stock remains, deal directly or atomically fill empty columns then deal!
   const emptyCols = state.columns.filter((c) => c.length === 0).length;
-  if (stockCount > 0 && emptyCols === 0) {
+  if (stockCount > 0) {
+    if (emptyCols === 0) {
+      return {
+        requestId,
+        steps: [
+          {
+            action: { type: 'deal' },
+            reason: '当前无更优移牌，自动发牌以打开新局面',
+          },
+        ],
+        status: 'found',
+      };
+    }
+
+    const fillAndDealSteps = planFillEmptyColumnsAndDeal(state.columns);
+    if (fillAndDealSteps && fillAndDealSteps.length > 0) {
+      return {
+        requestId,
+        steps: fillAndDealSteps,
+        status: 'found',
+      };
+    }
+
+    const undoSuggestion = computeSmartUndoSuggestion(state);
     return {
       requestId,
-      steps: [
-        {
-          action: { type: 'deal' },
-          reason: '当前无更优移牌，自动发牌以打开新局面',
-        },
-      ],
-      status: 'found',
+      steps: [],
+      status: 'deadlock',
+      suggestedUndoSteps: undoSuggestion,
+      message:
+        undoSuggestion > 0
+          ? `桌面牌数不足 10 张无法填满空列发牌，建议回退 ${undoSuggestion} 步`
+          : '桌面牌数不足 10 张无法填满空列发牌，建议开启新局',
     };
   }
 
-  // If stock remains and empty columns block dealing, try filling empty columns
-  if (stockCount > 0 && emptyCols > 0 && bestNode && bestNode.path.length > 0) {
-    const fillsEmpty = bestNode.columns.filter((c) => c.length === 0).length < emptyCols;
-    if (fillsEmpty) {
+  // Phase 3: Endgame with 0 stock left — retry without avoidHashes & deeper budget
+  // in case an unconventional multi-step reshuffle unlocks a completion or flip.
+  if (avoidHashes.length > 0) {
+    const rescue = runBeamSearch(
+      state.columns,
+      initialCompleted,
+      stockCount,
+      Math.max(beamWidth, 100),
+      Math.max(maxDepth, 18),
+      Math.max(maxNodes, 8000),
+      []
+    );
+    if (
+      rescue.bestNode &&
+      rescue.bestNode.path.length > 0 &&
+      (rescue.bestNode.won ||
+        rescue.bestNode.completedCount > initialCompleted ||
+        rescue.bestNode.revealedUnknown ||
+        rescue.bestNode.boardScore > rescue.initialBoardScore + 25)
+    ) {
       return {
         requestId,
-        steps: bestNode.path,
-        status: 'found',
+        steps: rescue.bestNode.path,
+        status: rescue.bestNode.won ? 'won_path' : 'found',
       };
     }
   }
 
+  const undoSuggestion = computeSmartUndoSuggestion(state);
   return {
     requestId,
     steps: [],
     status: 'deadlock',
-    suggestedUndoSteps: Math.min(state.history.length, 3),
+    suggestedUndoSteps: undoSuggestion,
     message:
-      state.history.length > 0
-        ? '当前牌局暂无可推进解法，建议回退几步或重新尝试'
+      undoSuggestion > 0
+        ? `当前牌局暂无可推进解法，建议回退 ${undoSuggestion} 步尝试其他路线`
         : '当前开局暂无可行推进路径，建议开启新局',
   };
 }

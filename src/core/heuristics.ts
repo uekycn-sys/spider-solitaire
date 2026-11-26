@@ -4,7 +4,14 @@ import {
   getLegalMoves,
   getMaxMovableTailStart,
 } from './rules';
-import type { Card, GameState, HintResult, MoveAction, Suit } from './types';
+import type {
+  Card,
+  GameState,
+  HintResult,
+  MoveAction,
+  SolverStep,
+  Suit,
+} from './types';
 
 const SUIT_CHAR: Record<Suit, string> = {
   spades: 'S',
@@ -40,20 +47,21 @@ export function hashBoardState(
 }
 
 /**
- * Evaluates a board position using Spider Solitaire domain heuristics:
- * - Completed K->A runs
- * - Hidden face-down cards remaining
- * - Empty columns (critical mobility)
- * - Same-suit contiguous sequence quadratic bonus
- * - Natural mixed-suit transitions & order inversions penalty
- * - Kings anchored at column base
+ * Pure potential-function board evaluator for Spider Solitaire:
+ * - Completed K->A runs (+15000 each)
+ * - Remaining face-down cards (-160 each)
+ * - Empty columns with diminishing marginal utility (+320, +270, +210, +150...)
+ * - Contiguous same-suit descending sequences (quadratic bonus + playable tail bonus)
+ * - Pure single-run columns & King-anchored columns
+ * - Natural (mixed-suit) descending links (+14)
+ * - Order breaks / buried cards penalty (-28 per break)
  */
 export function evaluateBoard(
   columns: Card[][],
   completedCount: number,
   _stockCount: number
 ): number {
-  let score = completedCount * 10000;
+  let score = completedCount * 15000;
   let emptyCols = 0;
   let faceDownCount = 0;
 
@@ -75,33 +83,172 @@ export function evaluateBoard(
     if (firstUpIndex === -1) continue;
 
     if (firstUpIndex === 0 && col[0].rank === 13) {
-      score += 36;
+      score += 55;
     }
 
     let runLen = 1;
+    let breakCount = 0;
+
     for (let i = firstUpIndex + 1; i < col.length; i++) {
       const prev = col[i - 1];
       const curr = col[i];
       if (prev.suit === curr.suit && prev.rank === curr.rank + 1) {
         runLen++;
       } else {
-        score += runLen * runLen * 14;
+        score += runLen * runLen * 18;
         runLen = 1;
         if (prev.rank === curr.rank + 1) {
-          score += 10;
+          score += 14;
         } else {
-          // Order inversion / buried blocker
-          score -= 14;
+          breakCount++;
+          score -= 28;
         }
       }
     }
-    score += runLen * runLen * 14;
+
+    // Tail same-suit run gets a slight extra bonus because it is directly movable
+    score += runLen * runLen * 18 + runLen * 6;
+
+    // Reward clean pure-run columns with zero hidden cards
+    if (firstUpIndex === 0 && breakCount === 0) {
+      score += 35;
+    }
   }
 
-  score += emptyCols * 240;
-  score -= faceDownCount * 120;
+  // Diminishing returns for multiple empty columns so the solver values the
+  // 1st/2nd empty column highly for maneuvering, without hoarding 4+ empty columns
+  const emptyWeights = [320, 270, 210, 150, 100, 80, 60, 50, 40, 30];
+  for (let i = 0; i < emptyCols; i++) {
+    score += emptyWeights[i] ?? 30;
+  }
+
+  score -= faceDownCount * 160;
 
   return score;
+}
+
+/**
+ * Plans a minimal-damage sequence of moves to fill all empty columns so the
+ * player/solver can legally deal from stock, and appends the `{ type: 'deal' }` step.
+ *
+ * Strategy:
+ * 1. Prefer unblocking moves (moving the maximal movable tail of a column where
+ *    `tailStart > 0`), which breaks ZERO same-suit runs while unburying hidden or
+ *    trapped cards.
+ * 2. If all non-empty columns are already pure runs from index 0, split a single
+ *    bottom card from the shortest run (length >= 2) into each remaining empty column.
+ */
+export function planFillEmptyColumnsAndDeal(
+  columns: Card[][]
+): SolverStep[] | null {
+  const totalCards = columns.reduce((sum, c) => sum + c.length, 0);
+  if (totalCards < 10) {
+    return null;
+  }
+
+  const sim = cloneColumns(columns);
+  const steps: SolverStep[] = [];
+
+  for (let guard = 0; guard < 12; guard++) {
+    const emptyCol = sim.findIndex((c) => c.length === 0);
+    if (emptyCol === -1) {
+      steps.push({
+        action: { type: 'deal' },
+        reason: '空列已填满，自动发牌以打开新局面',
+      });
+      return steps;
+    }
+
+    // Tier 1: Unblocking moves that split ZERO same-suit runs (tailStart > 0)
+    let bestMove: MoveAction | null = null;
+    let bestPriority = -Infinity;
+    let bestReason = '将阻塞牌移入空列以准备发牌';
+
+    for (let src = 0; src < sim.length; src++) {
+      const col = sim[src];
+      if (col.length < 2) continue;
+
+      const tailStart = getMaxMovableTailStart(col);
+      if (tailStart > 0) {
+        const exposed = col[tailStart - 1];
+        const tailLen = col.length - tailStart;
+        let priority = 1000;
+
+        if (!exposed.faceUp) {
+          // Flipping a hidden card while filling an empty column is strictly best
+          priority += 500;
+        } else {
+          // Prefer removing a short blocker (e.g. single 4♠ sitting on K-Q-J)
+          priority += Math.max(0, 80 - tailLen * 6);
+          // Bonus if the exposed card is part of a longer run or is a high card (K/Q/J)
+          priority += exposed.rank * 3;
+          // Extra bonus if the exposed card immediately matches another column's tail
+          const exposedIsOrderBreak = exposed.rank !== col[tailStart].rank + 1;
+          if (exposedIsOrderBreak) {
+            priority += 120;
+          }
+        }
+
+        if (priority > bestPriority) {
+          bestPriority = priority;
+          bestMove = {
+            type: 'move',
+            fromCol: src,
+            cardIndex: tailStart,
+            toCol: emptyCol,
+          };
+          bestReason = !exposed.faceUp
+            ? '填补空列并翻开下方暗牌，准备发牌'
+            : '移开阻塞牌填补空列以准备发牌';
+        }
+      }
+    }
+
+    // Tier 2: Every non-empty column is a pure run from index 0.
+    // Split just the bottom 1 card from the shortest multi-card column so long runs stay intact.
+    if (!bestMove) {
+      let bestSrc = -1;
+      let bestScore = -Infinity;
+
+      for (let src = 0; src < sim.length; src++) {
+        const col = sim[src];
+        if (col.length < 2) continue;
+        // Prefer shortest run (avoid splitting a 9-card run when a 2- or 3-card run exists)
+        // and prefer lower-rank bottom card (easier to re-attach after dealing)
+        const bottomCard = col[col.length - 1];
+        const candidateScore = -col.length * 25 - bottomCard.rank;
+        if (candidateScore > bestScore) {
+          bestScore = candidateScore;
+          bestSrc = src;
+        }
+      }
+
+      if (bestSrc === -1) {
+        return null;
+      }
+
+      bestMove = {
+        type: 'move',
+        fromCol: bestSrc,
+        cardIndex: sim[bestSrc].length - 1,
+        toCol: emptyCol,
+      };
+      bestReason = '拆分短牌尾填补空列以准备发牌';
+    }
+
+    // Apply simulated move
+    const moving = sim[bestMove.fromCol].splice(bestMove.cardIndex);
+    sim[bestMove.toCol].push(...moving);
+    const srcAfter = sim[bestMove.fromCol];
+    if (srcAfter.length > 0 && !srcAfter[srcAfter.length - 1].faceUp) {
+      srcAfter[srcAfter.length - 1].faceUp = true;
+    }
+    extractCompletedRunsInPlace(sim, 1);
+
+    steps.push({ action: bestMove, reason: bestReason });
+  }
+
+  return null;
 }
 
 export interface EvaluatedMove {
@@ -113,6 +260,7 @@ export interface EvaluatedMove {
   createdEmpty: boolean;
   extendedSameSuit: boolean;
   splitSameSuit: boolean;
+  boardDelta: number;
   score: number;
   reason: string;
   isProductive: boolean;
@@ -164,8 +312,9 @@ export function simulateAndScoreMove(
   const nextCompletedCount = completedCount + extracted.length;
   const completedRun = extracted.length > 0;
   const nextEval = evaluateBoard(nextColumns, nextCompletedCount, stockCount);
+  const boardDelta = nextEval - baseEval;
 
-  let delta = nextEval - baseEval;
+  let delta = boardDelta;
   let reason = '调整牌序以创造更多空间';
 
   if (completedRun) {
@@ -175,32 +324,29 @@ export function simulateAndScoreMove(
     delta += 520;
     reason = '连接并延长同花色顺子';
   } else if (revealedHidden) {
-    delta += 400;
+    delta += 420;
     reason = '移开阻塞牌以翻开下方暗牌';
   } else if (willCreateEmpty) {
-    delta += 320;
+    delta += 300;
     reason = '腾出空列以扩展移牌空间';
   } else if (dstCol.length === 0) {
-    // Moving a sub-stack into an empty column: check whether it exposes a same-suit partner or non-empty card
     const exposed = srcCol[move.cardIndex - 1];
     if (exposed && exposed.faceUp) {
-      delta += 45;
+      delta += 40;
       reason = '暂存至空列以释放被压住的牌';
     }
   } else if (dstHadSameSuit && splitSameSuit) {
-    // Only worthwhile if the source tail was shorter than destination or unlocks something
-    delta += 60;
+    delta += 50;
     reason = '重组同花色顺子';
   }
 
   // Discourage splitting an intact same-suit run onto a different-suit card or empty column
   // unless it flips a face-down card or completes a run.
   if (splitSameSuit && !completedRun && !revealedHidden && !dstHadSameSuit) {
-    delta -= 650;
+    delta -= 520;
   }
 
-  // Discourage moving from a single-suit column onto another single card of a different suit
-  // when both have the exact same parent state (pure lateral shuffling).
+  // Discourage pure lateral shuffling between two different-suit cards of identical rank
   const srcParent = move.cardIndex > 0 ? srcCol[move.cardIndex - 1] : null;
   if (
     !completedRun &&
@@ -213,7 +359,7 @@ export function simulateAndScoreMove(
     srcParent.rank === dstCol[dstCol.length - 1].rank &&
     srcParent.suit !== moving[0].suit
   ) {
-    delta -= 180;
+    delta -= 200;
   }
 
   const nextHash = hashBoardState(nextColumns, stockCount, nextCompletedCount);
@@ -222,7 +368,7 @@ export function simulateAndScoreMove(
     revealedHidden ||
     willCreateEmpty ||
     (dstHadSameSuit && !splitSameSuit) ||
-    delta > 15;
+    boardDelta > 15;
 
   return {
     move,
@@ -233,6 +379,7 @@ export function simulateAndScoreMove(
     createdEmpty: willCreateEmpty,
     extendedSameSuit: dstHadSameSuit,
     splitSameSuit,
+    boardDelta,
     score: delta,
     reason,
     isProductive,
@@ -285,7 +432,7 @@ export function getBestHint(
           bestFollowScore = second.score;
         }
       }
-      combinedScore += bestFollowScore * 0.65;
+      combinedScore += bestFollowScore * 0.68;
     }
 
     if (combinedScore > bestCombinedScore) {
@@ -314,18 +461,19 @@ export function getBestHint(
       };
     }
 
-    if (bestEval) {
+    const fillPlan = planFillEmptyColumnsAndDeal(state.columns);
+    if (fillPlan && fillPlan.length > 0 && fillPlan[0].action.type === 'move') {
       return {
-        action: bestEval.move,
-        reason: '需先填满空列，方可继续从发牌堆发牌',
-        score: bestCombinedScore,
+        action: fillPlan[0].action,
+        reason: fillPlan[0].reason,
+        score: 0,
         status: 'move',
       };
     }
 
     return {
       action: null,
-      reason: '存在空列无法发牌且暂无可移序列，建议撤销几步',
+      reason: '桌面牌数不足 10 张，无法填满空列发牌，建议撤销几步',
       score: -100,
       status: 'fill_empty_to_deal',
     };

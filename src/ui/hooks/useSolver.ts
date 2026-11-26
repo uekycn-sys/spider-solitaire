@@ -41,8 +41,17 @@ export function useSolver({
   const requestIdRef = useRef(0);
   const visitedHashesRef = useRef<Set<string>>(new Set());
   const phaseTimerRef = useRef<number | null>(null);
+
+  // Keep latest callbacks/state in refs so 1-second timer ticks on elapsedSeconds
+  // NEVER reset or cancel the 350ms step preview timer!
   const latestStateRef = useRef(gameState);
   latestStateRef.current = gameState;
+  const executeMoveRef = useRef(executeMove);
+  executeMoveRef.current = executeMove;
+  const handleDealStockRef = useRef(handleDealStock);
+  handleDealStockRef.current = handleDealStock;
+
+  const boardSignature = `${gameState.id}|${gameState.moves}|${gameState.completedRuns.length}|${gameState.stockDeals.length}`;
 
   const clearPhaseTimer = useCallback(() => {
     if (phaseTimerRef.current !== null) {
@@ -129,7 +138,7 @@ export function useSolver({
       const nextId = ++requestIdRef.current;
       setStatus('searching');
 
-      const avoid = Array.from(visitedHashesRef.current).slice(-60);
+      const avoid = Array.from(visitedHashesRef.current).slice(-80);
       if (workerRef.current) {
         const req: SolverRequest = {
           requestId: nextId,
@@ -138,7 +147,6 @@ export function useSolver({
         };
         workerRef.current.postMessage(req);
       } else {
-        // Fallback if Web Worker unavailable
         window.setTimeout(() => {
           const res = solveFromState(stateSnapshot, {
             requestId: nextId,
@@ -152,7 +160,8 @@ export function useSolver({
   );
 
   const startSolver = useCallback(() => {
-    if (gameState.won) return;
+    const curr = latestStateRef.current;
+    if (curr.won) return;
     if (status === 'running' || status === 'searching') {
       return;
     }
@@ -164,14 +173,14 @@ export function useSolver({
     clearPhaseTimer();
     visitedHashesRef.current = new Set([
       hashBoardState(
-        gameState.columns,
-        gameState.stockDeals.length,
-        gameState.completedRuns.length
+        curr.columns,
+        curr.stockDeals.length,
+        curr.completedRuns.length
       ),
     ]);
     setQueue([]);
-    requestNextBatch(gameState);
-  }, [gameState, status, clearPhaseTimer, requestNextBatch]);
+    requestNextBatch(curr);
+  }, [status, clearPhaseTimer, requestNextBatch]);
 
   const togglePause = useCallback(() => {
     if (status === 'running' || status === 'searching') {
@@ -190,21 +199,22 @@ export function useSolver({
   // Step demonstration cadence: highlight source + dashed target for 350ms, then execute move
   useEffect(() => {
     if (status !== 'running') return;
-    if (gameState.won) {
+    const curr = latestStateRef.current;
+    if (curr.won) {
       stopSolver();
       return;
     }
 
     if (queue.length === 0) {
-      requestNextBatch(gameState);
+      requestNextBatch(curr);
       return;
     }
 
     const nextStep = queue[0];
     const currHash = hashBoardState(
-      gameState.columns,
-      gameState.stockDeals.length,
-      gameState.completedRuns.length
+      curr.columns,
+      curr.stockDeals.length,
+      curr.completedRuns.length
     );
     visitedHashesRef.current.add(currHash);
 
@@ -219,11 +229,16 @@ export function useSolver({
 
       phaseTimerRef.current = window.setTimeout(() => {
         setActiveHint(null);
-        const ok = executeMove(move, true);
+        const beforeCompleted = latestStateRef.current.completedRuns.length;
+        const ok = executeMoveRef.current(move, true);
         if (!ok) {
           setQueue([]);
           requestNextBatch(latestStateRef.current);
           return;
+        }
+        // Clear visited loop memory whenever a K->A run completes (irreversible progress)
+        if (latestStateRef.current.completedRuns.length > beforeCompleted) {
+          visitedHashesRef.current.clear();
         }
         setQueue((prev) => prev.slice(1));
       }, 350);
@@ -231,12 +246,13 @@ export function useSolver({
       setActiveHint({ type: 'deal' });
       phaseTimerRef.current = window.setTimeout(() => {
         setActiveHint(null);
-        const ok = handleDealStock();
+        const ok = handleDealStockRef.current();
         if (!ok) {
           stopSolver();
           return;
         }
-        // Re-solve with newly dealt face-up cards
+        // Dealing adds 10 new cards — reset visited hashes & re-plan immediately
+        visitedHashesRef.current.clear();
         setQueue([]);
       }, 350);
     }
@@ -247,9 +263,7 @@ export function useSolver({
   }, [
     status,
     queue,
-    gameState,
-    executeMove,
-    handleDealStock,
+    boardSignature,
     setActiveHint,
     requestNextBatch,
     stopSolver,
