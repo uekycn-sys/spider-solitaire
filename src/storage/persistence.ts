@@ -32,6 +32,7 @@ export function getDefaultPreferences(): UserPreferences {
     feltTheme: 'emerald',
     cardBack: 'blue',
     toolbarCollapsed: false,
+    cardStyle: 'auto',
   };
 }
 

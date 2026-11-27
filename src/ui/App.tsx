@@ -11,6 +11,7 @@ import { TableauBoard, type BoardMetrics } from './components/TableauBoard';
 import { TopHud } from './components/TopHud';
 import { useGameController } from './hooks/useGameController';
 import { useSolver } from './hooks/useSolver';
+import { useViewportMode } from './hooks/useViewportMode';
 
 export const App: React.FC = () => {
   const {
@@ -53,6 +54,7 @@ export const App: React.FC = () => {
   const [difficultyModalOpen, setDifficultyModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [boardMetrics, setBoardMetrics] = useState<BoardMetrics | null>(null);
+  const viewportMode = useViewportMode();
 
   const handleMetricsChange = useCallback((m: BoardMetrics) => {
     setBoardMetrics((prev) =>
@@ -193,6 +195,9 @@ export const App: React.FC = () => {
         difficulty={gameState.difficulty}
         solverStatus={solverStatus}
         isFullscreen={isFullscreen}
+        isCompactLandscape={viewportMode.isCompactLandscape}
+        isMobilePortrait={viewportMode.isMobilePortrait}
+        fullscreenSupported={viewportMode.fullscreenSupported}
         onOpenMenu={() => setMenuOpen(true)}
         onReturnHome={() => {
           stopSolver();
@@ -208,7 +213,10 @@ export const App: React.FC = () => {
         <div
           key={toast.id}
           role="status"
-          className="fixed top-14 sm:top-16 left-1/2 -translate-x-1/2 z-40 max-w-[92vw] px-4 py-2 rounded-full bg-[#0a140f]/92 backdrop-blur-md border border-[#d4af37]/55 shadow-[0_8px_24px_rgba(0,0,0,0.6)] flex items-center gap-3 text-xs sm:text-sm"
+          className={[
+            'fixed left-1/2 -translate-x-1/2 z-40 max-w-[92vw] px-4 py-2 rounded-full bg-[#0a140f]/92 backdrop-blur-md border border-[#d4af37]/55 shadow-[0_8px_24px_rgba(0,0,0,0.6)] flex items-center gap-3 text-xs sm:text-sm',
+            viewportMode.isCompactLandscape ? 'top-11' : 'top-14 sm:top-16',
+          ].join(' ')}
         >
           <span
             className={
@@ -238,6 +246,8 @@ export const App: React.FC = () => {
         <TableauBoard
           columns={gameState.columns}
           cardBack={preferences.cardBack}
+          cardStyle={preferences.cardStyle}
+          viewportMode={viewportMode}
           activeHint={activeHint}
           emptyColWarnings={emptyColWarnings}
           shakingCol={shakingCol}
@@ -256,9 +266,13 @@ export const App: React.FC = () => {
         completedRuns={gameState.completedRuns}
         stockCount={gameState.stockDeals.length}
         cardBack={preferences.cardBack}
+        cardStyle={preferences.cardStyle}
         cardWidth={boardMetrics?.cardWidth ?? 86}
         hasEmptyColumns={hasEmptyColumns}
         highlightDeal={activeHint?.type === 'deal'}
+        isCompactLandscape={viewportMode.isCompactLandscape}
+        isMobilePortrait={viewportMode.isMobilePortrait}
+        toolbarCollapsed={preferences.toolbarCollapsed}
         onDealStock={handleUserDeal}
         completedZoneRef={completedZoneRef}
         stockZoneRef={stockZoneRef}
@@ -269,6 +283,8 @@ export const App: React.FC = () => {
         collapsed={preferences.toolbarCollapsed}
         canUndo={gameState.history.length > 0}
         solverActive={solverStatus !== 'idle'}
+        isCompactLandscape={viewportMode.isCompactLandscape}
+        isMobilePortrait={viewportMode.isMobilePortrait}
         onToggleCollapse={() =>
           updatePreferences({
             toolbarCollapsed: !preferences.toolbarCollapsed,

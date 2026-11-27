@@ -1,10 +1,11 @@
 import React from 'react';
 import type { Card, CardBackTheme } from '../../core/types';
-import { CardBackSvg, CardFaceSvg } from './CardSvg';
+import { CardBackSvg, CardFaceSvg, type CardFaceVariant } from './CardSvg';
 
 interface CardViewProps {
   card: Card;
   cardBack: CardBackTheme;
+  faceVariant?: CardFaceVariant;
   width: number;
   height: number;
   isMovable?: boolean;
@@ -20,6 +21,7 @@ export const CardView: React.FC<CardViewProps> = React.memo(
   ({
     card,
     cardBack,
+    faceVariant = 'classic',
     width,
     height,
     isMovable = false,
@@ -40,15 +42,15 @@ export const CardView: React.FC<CardViewProps> = React.memo(
           ...style,
         }}
         className={[
-          'card-3d-scene absolute left-0 select-none rounded-[8px]',
-          isMovable ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
+          'card-3d-scene absolute left-0 select-none rounded-[6px] sm:rounded-[8px]',
+          isMovable ? 'cursor-grab active:cursor-grabbing touch-none' : 'cursor-default',
           isDraggingOrigin ? 'opacity-0 pointer-events-none' : '',
           isShaking ? 'animate-card-shake' : '',
         ].join(' ')}
       >
         <div
           className={[
-            'card-3d-inner relative w-full h-full rounded-[8px]',
+            'card-3d-inner relative w-full h-full rounded-[6px] sm:rounded-[8px]',
             card.faceUp ? '' : '[transform:rotateY(180deg)]',
             isHintSource
               ? 'hint-source-glow'
@@ -59,10 +61,15 @@ export const CardView: React.FC<CardViewProps> = React.memo(
             card.faceUp && !isMovable ? 'brightness-[0.93]' : '',
           ].join(' ')}
         >
-          <div className="card-3d-face absolute inset-0 rounded-[8px] overflow-hidden">
-            <CardFaceSvg suit={card.suit} rank={card.rank} className="w-full h-full block" />
+          <div className="card-3d-face absolute inset-0 rounded-[6px] sm:rounded-[8px] overflow-hidden">
+            <CardFaceSvg
+              suit={card.suit}
+              rank={card.rank}
+              variant={faceVariant}
+              className="w-full h-full block"
+            />
           </div>
-          <div className="card-3d-face card-3d-back absolute inset-0 rounded-[8px] overflow-hidden">
+          <div className="card-3d-face card-3d-back absolute inset-0 rounded-[6px] sm:rounded-[8px] overflow-hidden">
             <CardBackSvg theme={cardBack} className="w-full h-full block" />
           </div>
         </div>

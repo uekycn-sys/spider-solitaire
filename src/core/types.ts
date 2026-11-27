@@ -114,10 +114,12 @@ export type AllStats = Record<Difficulty, DifficultyStats>;
 
 export type FeltTheme = 'emerald' | 'navy' | 'burgundy';
 export type CardBackTheme = 'blue' | 'crimson' | 'emerald';
+export type CardFaceStyle = 'auto' | 'large' | 'classic';
 
 export interface UserPreferences {
   muted: boolean;
   feltTheme: FeltTheme;
   cardBack: CardBackTheme;
   toolbarCollapsed: boolean;
+  cardStyle: CardFaceStyle;
 }

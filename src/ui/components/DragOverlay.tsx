@@ -1,10 +1,11 @@
 import React from 'react';
 import type { Card, CardBackTheme } from '../../core/types';
-import { CardFaceSvg } from './CardSvg';
+import { CardFaceSvg, type CardFaceVariant } from './CardSvg';
 
 interface DragOverlayProps {
   cards: Card[];
   cardBack: CardBackTheme;
+  faceVariant?: CardFaceVariant;
   x: number;
   y: number;
   cardWidth: number;
@@ -14,6 +15,7 @@ interface DragOverlayProps {
 
 export const DragOverlay: React.FC<DragOverlayProps> = ({
   cards,
+  faceVariant = 'classic',
   x,
   y,
   cardWidth,
@@ -38,14 +40,19 @@ export const DragOverlay: React.FC<DragOverlayProps> = ({
       {cards.map((card, idx) => (
         <div
           key={card.id}
-          className="absolute left-0 rounded-[8px] shadow-[0_14px_28px_rgba(0,0,0,0.6),0_4px_10px_rgba(0,0,0,0.45)]"
+          className="absolute left-0 rounded-[6px] sm:rounded-[8px] shadow-[0_14px_28px_rgba(0,0,0,0.6),0_4px_10px_rgba(0,0,0,0.45)]"
           style={{
             top: idx * stepY,
             width: cardWidth,
             height: cardHeight,
           }}
         >
-          <CardFaceSvg suit={card.suit} rank={card.rank} className="w-full h-full block" />
+          <CardFaceSvg
+            suit={card.suit}
+            rank={card.rank}
+            variant={faceVariant}
+            className="w-full h-full block"
+          />
         </div>
       ))}
     </div>

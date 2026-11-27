@@ -283,14 +283,238 @@ function VintageCourtArt({
   );
 }
 
+export type CardFaceVariant = 'classic' | 'compact-portrait' | 'compact-landscape';
+
+function CompactPortraitCourtArt({
+  rank,
+  suit,
+  color,
+}: {
+  rank: 11 | 12 | 13;
+  suit: Suit;
+  color: string;
+}) {
+  const isRed = suit === 'hearts' || suit === 'diamonds';
+  const accent = isRed ? '#b91c1c' : '#1e3a5f';
+  const gold = '#d4af37';
+
+  return (
+    <g>
+      <rect
+        x="14"
+        y="82"
+        width="112"
+        height="116"
+        rx="8"
+        fill="#faf6ea"
+        stroke={gold}
+        strokeWidth="2"
+      />
+      <rect
+        x="18"
+        y="86"
+        width="104"
+        height="108"
+        rx="5"
+        fill="none"
+        stroke={accent}
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        opacity="0.55"
+      />
+      {rank === 13 && (
+        <path
+          d="M46 112 L50 93 L60 103 L70 90 L80 103 L90 93 L94 112 Z"
+          fill={gold}
+          stroke="#7c580d"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      )}
+      {rank === 12 && (
+        <path
+          d="M48 112 L55 96 L70 91 L85 96 L92 112 Z"
+          fill={gold}
+          stroke="#7c580d"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      )}
+      {rank === 11 && (
+        <path
+          d="M48 112 Q70 92 92 112 L86 101 Q70 89 54 101 Z"
+          fill={accent}
+          stroke={gold}
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      )}
+      <SuitSymbol suit={suit} x={70} y={154} size={62} color={color} />
+    </g>
+  );
+}
+
 export const CardFaceSvg: React.FC<{
   suit: Suit;
   rank: Rank;
+  variant?: CardFaceVariant;
   className?: string;
-}> = React.memo(({ suit, rank, className }) => {
+}> = React.memo(({ suit, rank, variant = 'classic', className }) => {
   const color = getSuitColor(suit);
   const label = getRankLabel(rank);
   const isTen = rank === 10;
+
+  if (variant === 'compact-portrait') {
+    return (
+      <svg
+        viewBox="0 0 140 212"
+        className={className}
+        aria-label={`${getSuitNameZh(suit)} ${label}`}
+      >
+        <defs>
+          <linearGradient id="card-paper-compact-p" x1="0" y1="0" x2="0.8" y2="1">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#f3efe3" />
+          </linearGradient>
+        </defs>
+
+        <rect
+          x="1.5"
+          y="1.5"
+          width="137"
+          height="209"
+          rx="11"
+          fill="url(#card-paper-compact-p)"
+          stroke="#9a9180"
+          strokeWidth="2.4"
+        />
+
+        {/* Jumbo top header for effortless mobile portrait reading */}
+        <text
+          x={isTen ? 4 : 10}
+          y={isTen ? 55 : 57}
+          fill={color}
+          fontSize={isTen ? '50' : '62'}
+          fontWeight="900"
+          fontFamily="'SF Pro Display', 'Inter', -apple-system, 'PingFang SC', sans-serif"
+          letterSpacing={isTen ? '-4.5' : '0'}
+        >
+          {label}
+        </text>
+        <SuitSymbol suit={suit} x={108} y={38} size={48} color={color} />
+        <line x1="10" y1="74" x2="130" y2="74" stroke="#dfd7c6" strokeWidth="1.4" />
+
+        {/* Clean center artwork */}
+        {rank <= 10 && (
+          <g>
+            <SuitSymbol suit={suit} x={70} y={144} size={84} color={color} />
+            {rank === 1 && suit === 'spades' && (
+              <circle
+                cx="70"
+                cy="144"
+                r="46"
+                fill="none"
+                stroke="#d4af37"
+                strokeWidth="1.3"
+                opacity="0.55"
+              />
+            )}
+          </g>
+        )}
+
+        {(rank === 11 || rank === 12 || rank === 13) && (
+          <CompactPortraitCourtArt rank={rank} suit={suit} color={color} />
+        )}
+      </svg>
+    );
+  }
+
+  if (variant === 'compact-landscape') {
+    return (
+      <svg
+        viewBox="0 0 140 184"
+        className={className}
+        aria-label={`${getSuitNameZh(suit)} ${label}`}
+      >
+        <defs>
+          <linearGradient id="card-paper-compact-l" x1="0" y1="0" x2="0.8" y2="1">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#f3efe3" />
+          </linearGradient>
+        </defs>
+
+        <rect
+          x="1.5"
+          y="1.5"
+          width="137"
+          height="181"
+          rx="10"
+          fill="url(#card-paper-compact-l)"
+          stroke="#a69d8c"
+          strokeWidth="2.0"
+        />
+
+        {/* Ultra-compact top-aligned header for stacked landscape legibility */}
+        <text
+          x={isTen ? 5 : 10}
+          y={isTen ? 32 : 33}
+          fill={color}
+          fontSize={isTen ? '34' : '39'}
+          fontWeight="900"
+          fontFamily="'SF Pro Display', 'Inter', -apple-system, 'PingFang SC', sans-serif"
+          letterSpacing={isTen ? '-3.2' : '0'}
+        >
+          {label}
+        </text>
+        <SuitSymbol suit={suit} x={114} y={21} size={29} color={color} />
+        <line x1="10" y1="42" x2="130" y2="42" stroke="#dfd7c6" strokeWidth="1.1" />
+
+        {/* Center artwork */}
+        {rank === 1 && (
+          <g>
+            <SuitSymbol
+              suit={suit}
+              x={70}
+              y={112}
+              size={62}
+              color={color}
+            />
+            {suit === 'spades' && (
+              <circle
+                cx="70"
+                cy="112"
+                r="36"
+                fill="none"
+                stroke="#d4af37"
+                strokeWidth="1"
+                opacity="0.55"
+              />
+            )}
+          </g>
+        )}
+
+        {rank >= 2 &&
+          rank <= 10 &&
+          PIP_LAYOUTS[rank].map(([px, py, flip], idx) => (
+            <SuitSymbol
+              key={idx}
+              suit={suit}
+              x={px}
+              y={44 + (py - 36) * 0.85}
+              size={rank >= 9 ? 20 : 23}
+              color={color}
+              flip={flip}
+            />
+          ))}
+
+        {(rank === 11 || rank === 12 || rank === 13) && (
+          <g transform="translate(0 12) scale(1 0.86)">
+            <VintageCourtArt rank={rank} suit={suit} color={color} />
+          </g>
+        )}
+      </svg>
+    );
+  }
 
   return (
     <svg
@@ -320,7 +544,7 @@ export const CardFaceSvg: React.FC<{
       {/* Top header: bold rank left + bold suit right (always visible even under tight compression) */}
       <text
         x={isTen ? 9 : 12}
-        y={isTen ? 27 : 29}
+        y={isTen ? 25 : 27}
         fill={color}
         fontSize={isTen ? '23' : '27'}
         fontWeight="800"
@@ -329,14 +553,14 @@ export const CardFaceSvg: React.FC<{
       >
         {label}
       </text>
-      <SuitSymbol suit={suit} x={isTen ? 45 : 42} y={20} size={17} color={color} />
-      <SuitSymbol suit={suit} x={119} y={20} size={22} color={color} />
+      <SuitSymbol suit={suit} x={isTen ? 45 : 42} y={19} size={17} color={color} />
+      <SuitSymbol suit={suit} x={119} y={19} size={22} color={color} />
 
       {/* Mirrored bottom corner */}
       <g transform="rotate(180 70 98)">
         <text
           x={isTen ? 9 : 12}
-          y={isTen ? 27 : 29}
+          y={isTen ? 25 : 27}
           fill={color}
           fontSize={isTen ? '23' : '27'}
           fontWeight="800"
@@ -345,11 +569,11 @@ export const CardFaceSvg: React.FC<{
         >
           {label}
         </text>
-        <SuitSymbol suit={suit} x={isTen ? 45 : 42} y={20} size={17} color={color} />
+        <SuitSymbol suit={suit} x={isTen ? 45 : 42} y={19} size={17} color={color} />
       </g>
 
       {/* Subtle header separator line */}
-      <line x1="12" y1="35" x2="128" y2="35" stroke="#e5dfd0" strokeWidth="0.9" />
+      <line x1="12" y1="34" x2="128" y2="34" stroke="#e5dfd0" strokeWidth="0.9" />
 
       {/* Center artwork */}
       {rank === 1 && (

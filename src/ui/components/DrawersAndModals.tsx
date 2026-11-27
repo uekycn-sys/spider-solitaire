@@ -13,6 +13,7 @@ import {
 import type {
   AllStats,
   CardBackTheme,
+  CardFaceStyle,
   Difficulty,
   FeltTheme,
   UserPreferences,
@@ -52,7 +53,7 @@ export const MenuDrawer: React.FC<DrawerProps> = ({
         className="fixed inset-0 bg-black/65 backdrop-blur-xs"
         onClick={onClose}
       />
-      <aside className="relative z-10 w-full max-w-md h-full bg-[#0b1410] border-r border-[#d4af37]/40 shadow-2xl flex flex-col">
+      <aside className="relative z-10 w-full max-w-md h-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] bg-[#0b1410] border-r border-[#d4af37]/40 shadow-2xl flex flex-col">
         <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#f3c950] tracking-wide">
             牌桌菜单与设置
@@ -191,6 +192,40 @@ export const MenuDrawer: React.FC<DrawerProps> = ({
                   ))}
                 </div>
               </div>
+
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-400 mb-3">
+                  牌面显示风格
+                </h3>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {(
+                    [
+                      { id: 'auto', label: '自动适配', desc: '手机端自动放大' },
+                      { id: 'large', label: '大字清晰', desc: '高对比超大字号' },
+                      { id: 'classic', label: '经典复古', desc: '传统扑克牌面' },
+                    ] as { id: CardFaceStyle; label: string; desc: string }[]
+                  ).map((styleItem) => (
+                    <button
+                      key={styleItem.id}
+                      type="button"
+                      onClick={() => onUpdatePreferences({ cardStyle: styleItem.id })}
+                      className={[
+                        'p-2.5 rounded-xl border text-center transition cursor-pointer',
+                        preferences.cardStyle === styleItem.id
+                          ? 'border-[#f3c950] bg-[#f3c950]/10'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10',
+                      ].join(' ')}
+                    >
+                      <div className="text-xs font-semibold text-stone-100">
+                        {styleItem.label}
+                      </div>
+                      <div className="text-[10px] text-stone-400 mt-1">
+                        {styleItem.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
 
@@ -319,7 +354,7 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
         className="fixed inset-0 bg-black/72 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-gradient-to-b from-[#112119] to-[#09120d] border border-[#d4af37]/55 shadow-[0_24px_60px_rgba(0,0,0,0.8)] p-6 space-y-5">
+      <div className="relative z-10 w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl bg-gradient-to-b from-[#112119] to-[#09120d] border border-[#d4af37]/55 shadow-[0_24px_60px_rgba(0,0,0,0.8)] p-5 sm:p-6 space-y-4 sm:space-y-5">
         <div className="text-center space-y-1">
           <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-[#f3c950]/12 border border-[#f3c950]/35 text-[#f3c950] text-xs font-medium mb-1">
             <Sparkles className="w-3.5 h-3.5" />
@@ -405,7 +440,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/75 backdrop-blur-sm" />
-      <div className="relative z-10 w-full max-w-sm rounded-2xl bg-gradient-to-b from-[#172b20] to-[#0a140f] border-2 border-[#f3c950]/80 shadow-[0_0_50px_rgba(243,201,80,0.35)] p-6 text-center space-y-5">
+      <div className="relative z-10 w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-2xl bg-gradient-to-b from-[#172b20] to-[#0a140f] border-2 border-[#f3c950]/80 shadow-[0_0_50px_rgba(243,201,80,0.35)] p-5 sm:p-6 text-center space-y-4 sm:space-y-5">
         <div className="mx-auto w-14 h-14 rounded-full bg-[#f3c950]/18 border border-[#f3c950] flex items-center justify-center shadow-[0_0_24px_rgba(243,201,80,0.45)]">
           <Award className="w-8 h-8 text-[#f3c950]" />
         </div>
